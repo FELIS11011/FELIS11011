@@ -1,0 +1,448 @@
+<meta charset="UTF-8" />
+<title>F1 What-If Race Replay Simulator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1a1d23;
+    --ink-muted: #5b6270;
+    --border: #dfe2e8;
+    --accent: #d40000;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1e2126;
+      --ink: #eef0f3;
+      --ink-muted: #9aa1ab;
+      --border: #30343b;
+      --accent: #ff4d4d;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--ink-muted); font-size: 14px; line-height: 1.5; }
+  .data-note {
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+    margin-top: 18px;
+  }
+  .panel h2 { font-size: 15px; margin: 0 0 14px; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: end;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+  .field label { font-size: 12px; color: var(--ink-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  select, input[type="number"] {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .buttons { display: flex; gap: 10px; }
+  button {
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .hint { font-size: 12.5px; color: var(--ink-muted); margin-top: 10px; }
+  .chart-panel { padding-bottom: 8px; }
+  .chart-box { position: relative; height: 480px; }
+  .result-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .stat { min-width: 140px; }
+  .stat .label { font-size: 12px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .stat .value.better { color: #1a9850; }
+  .stat .value.worse { color: var(--accent); }
+  footer { margin-top: 22px; font-size: 12px; color: var(--ink-muted); text-align: center; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="raceTitle">F1 What-If Race Replay Simulator</h1>
+    <p>Real lap-by-lap positions from the race, plus your own strategy call: pick a driver, change when they pit and what tire they bolt on, and see how it would have played out.</p>
+    <div class="data-note" id="dataNote"></div>
+  </header>
+
+  <section class="panel">
+    <h2>Change a driver's strategy</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="driverSelect">Driver</label>
+        <select id="driverSelect"></select>
+      </div>
+      <div class="field">
+        <label for="pitLapInput">Pit lap</label>
+        <input type="number" id="pitLapInput" min="2" max="57" />
+      </div>
+      <div class="field">
+        <label for="compoundSelect">Tire after pit stop</label>
+        <select id="compoundSelect">
+          <option value="SOFT">Soft</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="HARD">Hard</option>
+        </select>
+      </div>
+      <div class="buttons">
+        <button class="primary" id="simulateBtn">Simulate</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+    </div>
+    <p class="hint" id="strategyHint"></p>
+
+    <div class="result-row" id="resultRow" style="display:none;">
+      <div class="stat">
+        <div class="label">Real finish</div>
+        <div class="value" id="realFinish">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">What-if finish</div>
+        <div class="value" id="whatIfFinish">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Total time delta</div>
+        <div class="value" id="timeDelta">—</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel chart-panel">
+    <h2>Position by lap</h2>
+    <div class="chart-box">
+      <canvas id="raceChart"></canvas>
+    </div>
+  </section>
+
+  <footer>Built with Chart.js. Click a legend entry to isolate a driver's line; click again to bring it back.</footer>
+</div>
+
+<script>
+const COLORS = { good: "#1a9850", bad: "#d40000" };
+
+let raceData = null;
+let chart = null;
+let driverCodesByFinish = [];
+let realCumulative = {}; // code -> [cumulative time after lap i], 0-indexed
+let whatIfDatasetIndex = null; // index into chart.data.datasets while a what-if line is shown
+
+async function init() {
+  const res = await fetch("race_data.json");
+  raceData = await res.json();
+
+  document.getElementById("raceTitle").textContent =
+    `${raceData.meta.year} ${raceData.meta.race_name} — What-If Simulator`;
+
+  const note = raceData.meta.data_source === "synthetic_placeholder"
+    ? `⚠ Placeholder data: ${raceData.meta.note}`
+    : `Real race data pulled via FastF1 for the ${raceData.meta.year} ${raceData.meta.race_name}.`;
+  document.getElementById("dataNote").textContent = note;
+
+  driverCodesByFinish = Object.keys(raceData.drivers).sort(
+    (a, b) => raceData.drivers[a].final_position - raceData.drivers[b].final_position
+  );
+
+  for (const code of driverCodesByFinish) {
+    const d = raceData.drivers[code];
+    const laps = d.laps.map((l) => l.lap_time);
+    realCumulative[code] = cumulativeSum(laps);
+  }
+
+  populateDriverSelect();
+  buildChart();
+  populateStrategyDefaults();
+
+  document.getElementById("driverSelect").addEventListener("change", () => {
+    clearWhatIf();
+    populateStrategyDefaults();
+  });
+  document.getElementById("simulateBtn").addEventListener("click", runSimulation);
+  document.getElementById("resetBtn").addEventListener("click", clearWhatIf);
+}
+
+function cumulativeSum(arr) {
+  const out = new Array(arr.length);
+  let running = 0;
+  for (let i = 0; i < arr.length; i++) {
+    running += arr[i];
+    out[i] = running;
+  }
+  return out;
+}
+
+function populateDriverSelect() {
+  const select = document.getElementById("driverSelect");
+  select.innerHTML = "";
+  for (const code of driverCodesByFinish) {
+    const d = raceData.drivers[code];
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = `P${d.final_position} — ${d.full_name} (${d.team})`;
+    select.appendChild(opt);
+  }
+}
+
+function populateStrategyDefaults() {
+  const code = document.getElementById("driverSelect").value;
+  const d = raceData.drivers[code];
+  const totalLaps = raceData.meta.total_laps;
+
+  const pitLapInput = document.getElementById("pitLapInput");
+  pitLapInput.min = 2;
+  pitLapInput.max = totalLaps;
+  const actualPitLap = d.pit_laps.length ? d.pit_laps[0] : Math.round(totalLaps / 2);
+  pitLapInput.value = actualPitLap;
+
+  const compoundSelect = document.getElementById("compoundSelect");
+  const secondStint = d.stints.find((s) => s.start_lap === actualPitLap + 1);
+  compoundSelect.value = secondStint ? secondStint.compound : "HARD";
+
+  const firstStint = d.stints[0];
+  document.getElementById("strategyHint").textContent =
+    `Actual race: started on ${firstStint.compound}, pitted lap ${actualPitLap}` +
+    (secondStint ? ` for ${secondStint.compound}.` : ".") +
+    ` Change the lap and/or tire above, then click Simulate.`;
+}
+
+function driverLabel(code) {
+  const d = raceData.drivers[code];
+  return `${code} — P${d.final_position}`;
+}
+
+function buildChart() {
+  const totalLaps = raceData.meta.total_laps;
+  const labels = Array.from({ length: totalLaps }, (_, i) => i + 1);
+  const numDrivers = driverCodesByFinish.length;
+
+  const datasets = driverCodesByFinish.map((code) => {
+    const d = raceData.drivers[code];
+    return {
+      code,
+      label: driverLabel(code),
+      data: d.laps.map((l) => l.position),
+      borderColor: d.color,
+      backgroundColor: d.color,
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHitRadius: 6,
+      tension: 0,
+      order: 1,
+    };
+  });
+
+  chart = new Chart(document.getElementById("raceChart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 250 },
+      interaction: { mode: "nearest", intersect: false },
+      scales: {
+        x: {
+          title: { display: true, text: "Lap" },
+          ticks: { maxTicksLimit: 15 },
+        },
+        y: {
+          reverse: true,
+          min: 1,
+          max: numDrivers,
+          ticks: { stepSize: 1 },
+          title: { display: true, text: "Position" },
+        },
+      },
+      plugins: {
+        legend: {
+          position: "right",
+          labels: { boxWidth: 12, font: { size: 10.5 } },
+        },
+        tooltip: {
+          callbacks: {
+            title: (items) => `Lap ${items[0].label}`,
+            label: (item) => `${item.dataset.label}: P${item.formattedValue}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function setFocus(code) {
+  chart.data.datasets.forEach((ds) => {
+    if (ds.code === code) {
+      ds.borderWidth = 3;
+      ds.borderColor = raceData.drivers[code].color;
+      ds._focused = true;
+    } else if (ds.isWhatIf) {
+      // leave as-is, handled separately
+    } else {
+      ds.borderWidth = 1.5;
+      ds.borderColor = hexWithAlpha(raceData.drivers[ds.code].color, 0.25);
+      ds._focused = false;
+    }
+  });
+  chart.update();
+}
+
+function hexWithAlpha(hex, alpha) {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function clearWhatIf() {
+  if (whatIfDatasetIndex !== null) {
+    chart.data.datasets.splice(whatIfDatasetIndex, 1);
+    whatIfDatasetIndex = null;
+  }
+  chart.data.datasets.forEach((ds) => {
+    ds.borderWidth = 1.5;
+    ds.borderColor = raceData.drivers[ds.code].color;
+  });
+  chart.update();
+  document.getElementById("resultRow").style.display = "none";
+}
+
+// Recalculates one driver's lap times from a chosen pit lap onward using the
+// linear tire-degradation model (fit from real laps in race_data.json):
+//   lap_time(tyre_life) = intercept + slope_per_lap * (tyre_life - 1)
+// The model's intercept is a field-wide average pace, so we anchor it to
+// this driver's own demonstrated pace: take their real lap right before the
+// new pit lap, see how far it sits from what the model would have predicted
+// for their old compound/tyre age, and carry that same personal offset into
+// the new compound's predicted lap times.
+function simulateDriver(code, newPitLap, newCompound) {
+  const totalLaps = raceData.meta.total_laps;
+  const laps = raceData.drivers[code].laps;
+  const pitLoss = raceData.avg_pit_loss_seconds;
+  const models = raceData.tire_degradation;
+
+  newPitLap = Math.max(2, Math.min(totalLaps, newPitLap));
+
+  const anchorLap = laps[newPitLap - 2]; // real lap right before the new pit lap
+  const anchorModel = models[anchorLap.compound];
+  let personalOffset = 0;
+  if (anchorModel) {
+    const predicted = anchorModel.intercept + anchorModel.slope_per_lap * (anchorLap.tyre_life - 1);
+    personalOffset = anchorLap.lap_time - predicted;
+  }
+
+  const newModel = models[newCompound];
+  const simLapTimes = new Array(totalLaps);
+  for (let i = 0; i < totalLaps; i++) {
+    const lapNumber = i + 1;
+    if (lapNumber < newPitLap) {
+      simLapTimes[i] = laps[i].lap_time;
+    } else {
+      const tyreLife = lapNumber - newPitLap + 1;
+      let t = newModel.intercept + newModel.slope_per_lap * (tyreLife - 1) + personalOffset;
+      if (lapNumber === newPitLap) t += pitLoss;
+      simLapTimes[i] = Math.round(t * 1000) / 1000;
+    }
+  }
+  return simLapTimes;
+}
+
+function positionsForSimulation(code, simLapTimes) {
+  const totalLaps = raceData.meta.total_laps;
+  const simCumulative = cumulativeSum(simLapTimes);
+  const otherCodes = driverCodesByFinish.filter((c) => c !== code);
+
+  const positions = new Array(totalLaps);
+  for (let i = 0; i < totalLaps; i++) {
+    let rank = 1;
+    for (const other of otherCodes) {
+      if (realCumulative[other][i] < simCumulative[i]) rank++;
+    }
+    positions[i] = rank;
+  }
+  return { positions, simCumulative };
+}
+
+function runSimulation() {
+  const code = document.getElementById("driverSelect").value;
+  const newPitLap = parseInt(document.getElementById("pitLapInput").value, 10);
+  const newCompound = document.getElementById("compoundSelect").value;
+
+  clearWhatIf();
+  setFocus(code);
+
+  const simLapTimes = simulateDriver(code, newPitLap, newCompound);
+  const { positions, simCumulative } = positionsForSimulation(code, simLapTimes);
+
+  const totalLaps = raceData.meta.total_laps;
+  const whatIfDataset = {
+    code,
+    isWhatIf: true,
+    label: `${code} — what if`,
+    data: positions,
+    borderColor: raceData.drivers[code].color,
+    backgroundColor: raceData.drivers[code].color,
+    borderWidth: 2.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    tension: 0,
+    order: 0,
+  };
+  chart.data.datasets.push(whatIfDataset);
+  whatIfDatasetIndex = chart.data.datasets.length - 1;
+  chart.update();
+
+  const realFinalPos = raceData.drivers[code].final_position;
+  const whatIfFinalPos = positions[totalLaps - 1];
+  const realTotal = realCumulative[code][totalLaps - 1];
+  const whatIfTotal = simCumulative[totalLaps - 1];
+  const delta = whatIfTotal - realTotal;
+
+  document.getElementById("realFinish").textContent = `P${realFinalPos}`;
+  document.getElementById("whatIfFinish").textContent = `P${whatIfFinalPos}`;
+  const deltaEl = document.getElementById("timeDelta");
+  deltaEl.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}s ${delta >= 0 ? "slower" : "faster"}`;
+  deltaEl.className = "value " + (delta > 0 ? "worse" : delta < 0 ? "better" : "");
+  document.getElementById("resultRow").style.display = "flex";
+}
+
+init();
+</script>
